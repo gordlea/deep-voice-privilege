@@ -39,6 +39,20 @@ cargo run --release -- --headless     # no UI, just vibes and glitch counters
 
 `-i` / `-o` take a device name or id; matching is case-insensitive, exact first, then substring.
 
+## Install
+
+macOS and Linux, via Homebrew:
+
+```sh
+brew install gordlea/tap/deep-voice
+```
+
+Windows: grab `deep_voice-<version>-x86_64-pc-windows-msvc.zip` from the
+[Releases page](https://github.com/gordlea/deep-voice-privilege/releases) and put `deep_voice.exe`
+somewhere on your `PATH`.
+
+Or build it yourself with `cargo install --path .` (see [Building](#building)).
+
 ## Setup per platform
 
 One-time step: get a virtual audio device, point `deep_voice` at it, and tell your meeting app

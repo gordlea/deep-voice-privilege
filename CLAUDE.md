@@ -26,6 +26,13 @@ cargo check --target aarch64-apple-darwin     # cross-check the macOS cfg branch
 
 There is no rustfmt config and lines run to ~110 columns; don't reformat whole files.
 
+Releases are automated: commits on `main` use Conventional Commits (`feat:`/`fix:` trigger a
+release, `chore:`/`docs:`/`ci:` don't). release-please opens a "chore(main): release X.Y.Z" PR
+that bumps `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md`; merging it tags `vX.Y.Z`, builds
+macOS/Linux/Windows archives, and `scripts/homebrew-formula.sh` rewrites `Formula/deep-voice.rb`
+in `gordlea/homebrew-tap` (needs the `HOMEBREW_TAP_TOKEN` secret). Never edit the tap formula or
+`CHANGELOG.md` by hand.
+
 Manual Linux audio check (PipeWire/Pulse): run the app, confirm with `pactl list short sinks`
 that `deepvoice` is RUNNING and `pactl list short sink-inputs` shows the stream, then feed a tone
 by playing a wav into a second null sink and passing its monitor as `-i`, and record
