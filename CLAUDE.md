@@ -31,7 +31,9 @@ release, `chore:`/`docs:`/`ci:` don't). release-please opens a "chore(main): rel
 that bumps `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md`; merging it tags `vX.Y.Z`, builds
 macOS/Linux/Windows archives, and `scripts/homebrew-formula.sh` rewrites `Formula/deep-voice-privilege.rb`
 in `gordlea/homebrew-tap` (needs the `HOMEBREW_TAP_TOKEN` secret). Never edit the tap formula or
-`CHANGELOG.md` by hand.
+`CHANGELOG.md` by hand. PR titles must themselves be Conventional Commits (`feat: …`, `fix: …`):
+squash merges use the PR title as the commit header, and release-please drops an unparsable
+commit entirely, including any `Release-As:` footer in its body (this is why PR #1 released nothing).
 
 Manual Linux audio check (PipeWire/Pulse): run the app, confirm with `pactl list short sinks`
 that `deepvoice` is RUNNING and `pactl list short sink-inputs` shows the stream, then feed a tone
