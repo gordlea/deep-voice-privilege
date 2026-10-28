@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`deep_voice` is a single-binary Rust CLI/TUI that pitch-shifts the microphone in real time into a
+`deep-voice-privilege` (shown in the UI as "deep voice") is a single-binary Rust CLI/TUI that pitch-shifts the microphone in real time into a
 virtual audio device (BlackHole on macOS, VB-CABLE on Windows, an auto-created PulseAudio/PipeWire
 null sink on Linux) so meeting apps can use the shifted voice as their mic. Audio I/O is `cpal`
 0.18, the UI is `ratatui`. README.md has the per-OS user setup.
@@ -25,6 +25,13 @@ cargo check --target aarch64-apple-darwin     # cross-check the macOS cfg branch
 ```
 
 There is no rustfmt config and lines run to ~110 columns; don't reformat whole files.
+
+Releases are automated: commits on `main` use Conventional Commits (`feat:`/`fix:` trigger a
+release, `chore:`/`docs:`/`ci:` don't). release-please opens a "chore(main): release X.Y.Z" PR
+that bumps `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md`; merging it tags `vX.Y.Z`, builds
+macOS/Linux/Windows archives, and `scripts/homebrew-formula.sh` rewrites `Formula/deep-voice-privilege.rb`
+in `gordlea/homebrew-tap` (needs the `HOMEBREW_TAP_TOKEN` secret). Never edit the tap formula or
+`CHANGELOG.md` by hand.
 
 Manual Linux audio check (PipeWire/Pulse): run the app, confirm with `pactl list short sinks`
 that `deepvoice` is RUNNING and `pactl list short sink-inputs` shows the stream, then feed a tone
