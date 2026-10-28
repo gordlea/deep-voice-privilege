@@ -71,9 +71,9 @@ jobs:
         if: ${{ runner.os != 'Windows' }}
         run: |
           set -euo pipefail
-          name="deep_voice-${TAG}-${{ matrix.target }}"
+          name="deep-voice-privilege-${TAG}-${{ matrix.target }}"
           mkdir -p "dist/${name}"
-          cp "target/${{ matrix.target }}/release/deep_voice" README.md LICENSE.md "dist/${name}/"
+          cp "target/${{ matrix.target }}/release/deep-voice-privilege" README.md LICENSE.md "dist/${name}/"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
           if command -v sha256sum >/dev/null; then
             (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
@@ -86,9 +86,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $name = "deep_voice-$env:TAG-${{ matrix.target }}"
+          $name = "deep-voice-privilege-$env:TAG-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/deep_voice.exe", "README.md", "LICENSE.md" -Destination "dist/$name/"
+          Copy-Item "target/${{ matrix.target }}/release/deep-voice-privilege.exe", "README.md", "LICENSE.md" -Destination "dist/$name/"
           Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
           $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
           [IO.File]::WriteAllText("$PWD/dist/$name.zip.sha256", "$hash  $name.zip`n")
@@ -127,18 +127,18 @@ jobs:
       - name: Render formula
         run: |
           mkdir -p tap/Formula
-          src/scripts/homebrew-formula.sh "$TAG" "$GITHUB_REPOSITORY" "$GITHUB_SERVER_URL" sha > tap/Formula/deep-voice.rb
-          cat tap/Formula/deep-voice.rb
+          src/scripts/homebrew-formula.sh "$TAG" "$GITHUB_REPOSITORY" "$GITHUB_SERVER_URL" sha > tap/Formula/deep-voice-privilege.rb
+          cat tap/Formula/deep-voice-privilege.rb
 
       - name: Push to tap
         working-directory: tap
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/deep-voice.rb
+          git add Formula/deep-voice-privilege.rb
           if git diff --cached --quiet; then
             echo "Formula already up to date."
           else
-            git commit -m "deep-voice ${TAG}"
+            git commit -m "deep-voice-privilege ${TAG}"
             git push
           fi

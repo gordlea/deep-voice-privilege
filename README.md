@@ -11,7 +11,7 @@ since the dawn of puberty. Deeper voices get rated as more competent, more trust
 leader-like, and more likely to be allowed to finish a sentence. Until now, the only fixes were
 "be born differently" or "take up smoking," neither of which has a good upgrade path.
 
-`deep_voice` sits between your microphone and your meeting app and lowers your voice a few
+`deep-voice-privilege` sits between your microphone and your meeting app and lowers your voice a few
 semitones in real time. Your ideas stay the same. Your interruptions-per-meeting go down. Your
 quarterly review becomes a formality. Promotions, respect, and a table at that restaurant are not
 guaranteed, but your odds are no longer being decided by vocal fold length.
@@ -44,24 +44,24 @@ cargo run --release -- --headless     # no UI, just vibes and glitch counters
 macOS and Linux, via Homebrew:
 
 ```sh
-brew install gordlea/tap/deep-voice
+brew install gordlea/tap/deep-voice-privilege
 ```
 
-Windows: grab `deep_voice-<version>-x86_64-pc-windows-msvc.zip` from the
-[Releases page](https://github.com/gordlea/deep-voice-privilege/releases) and put `deep_voice.exe`
+Windows: grab `deep-voice-privilege-<version>-x86_64-pc-windows-msvc.zip` from the
+[Releases page](https://github.com/gordlea/deep-voice-privilege/releases) and put `deep-voice-privilege.exe`
 somewhere on your `PATH`.
 
 Or build it yourself with `cargo install --path .` (see [Building](#building)).
 
 ## Setup per platform
 
-One-time step: get a virtual audio device, point `deep_voice` at it, and tell your meeting app
+One-time step: get a virtual audio device, point `deep-voice-privilege` at it, and tell your meeting app
 that device is your microphone. Your real microphone keeps doing the hard work in the background,
 uncredited, like you used to.
 
 ### macOS
 1. `brew install blackhole-2ch` ([BlackHole](https://existential.audio/blackhole/)).
-2. Run `deep_voice`. The output defaults to `BlackHole 2ch`.
+2. Run `deep-voice-privilege`. The output defaults to `BlackHole 2ch`.
 3. In the meeting app, pick **BlackHole 2ch** as the microphone.
 
 If it complains about sample rates, open *Audio MIDI Setup* and set the mic and BlackHole to the
@@ -69,7 +69,7 @@ same rate (48000 Hz is a solid, baritone choice).
 
 ### Windows
 1. Install [VB-CABLE](https://vb-audio.com/Cable/).
-2. Run `deep_voice`. The output defaults to `CABLE Input`.
+2. Run `deep-voice-privilege`. The output defaults to `CABLE Input`.
 3. In the meeting app, pick **CABLE Output (VB-Audio Virtual Cable)** as the microphone.
 
 Use Windows Terminal or another terminal with Unicode support; the legacy console cannot draw the
@@ -78,10 +78,10 @@ shared mode, which resamples on output, so rate mismatches are rare; if one appe
 default format on both devices under *Sound settings → device Properties → Advanced*.
 
 ### Linux
-Audio goes through PulseAudio or PipeWire (via pipewire-pulse). `deep_voice` creates a null sink
+Audio goes through PulseAudio or PipeWire (via pipewire-pulse). `deep-voice-privilege` creates a null sink
 called `deepvoice` if it is missing and removes it when you quit, so there is usually nothing to do:
 
-1. Run `deep_voice`.
+1. Run `deep-voice-privilege`.
 2. In the meeting app, pick **Monitor of DeepVoice** as the microphone.
 
 Prefer to manage your own privilege infrastructure? Pass `--no-create-sink` and create the sink
