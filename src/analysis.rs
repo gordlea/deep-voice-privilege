@@ -68,7 +68,34 @@ pub fn rms(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
-    (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+    (dot_and_energy(samples, samples).1 / samples.len() as f32).sqrt()
+}
+
+/// Accumulator lanes for the dot products. Splitting the running sums into independent lanes
+/// is what lets the compiler vectorize them: floats aren't reassociated, so a single scalar
+/// accumulator forces a serial dependency chain. Eight f32 lanes are two SSE/NEON registers,
+/// enough to keep the loop throughput-bound rather than latency-bound.
+const LANES: usize = 8;
+
+/// Returns `(Σ a·b, Σ b·b)` over the zipped slices. The summation order differs from a plain
+/// scalar loop only at float-rounding level.
+fn dot_and_energy(a: &[f32], b: &[f32]) -> (f32, f32) {
+    let mut xy = [0f32; LANES];
+    let mut yy = [0f32; LANES];
+    let (ac, ar) = a.as_chunks::<LANES>();
+    let (bc, br) = b.as_chunks::<LANES>();
+    for (ca, cb) in ac.iter().zip(bc) {
+        for l in 0..LANES {
+            xy[l] += ca[l] * cb[l];
+            yy[l] += cb[l] * cb[l];
+        }
+    }
+    let (mut sxy, mut syy) = (xy.iter().sum::<f32>(), yy.iter().sum::<f32>());
+    for (&x, &y) in ar.iter().zip(br) {
+        sxy += x * y;
+        syy += y * y;
+    }
+    (sxy, syy)
 }
 
 /// Estimates the fundamental of a voiced signal by normalized autocorrelation, searching
@@ -89,14 +116,10 @@ pub fn detect_pitch(samples: &[f32], sample_rate: u32) -> Option<f32> {
 
     // Normalized correlation at each lag, so the threshold is independent of level.
     let n = samples.len() - max_lag;
+    let head = &samples[..n];
+    let xx = dot_and_energy(head, head).1;
     let corr = |lag: usize| {
-        let (mut xy, mut xx, mut yy) = (0.0, 0.0, 0.0);
-        for i in 0..n {
-            let (a, b) = (samples[i], samples[i + lag]);
-            xy += a * b;
-            xx += a * a;
-            yy += b * b;
-        }
+        let (xy, yy) = dot_and_energy(head, &samples[lag..lag + n]);
         xy / (xx * yy).sqrt().max(1e-12)
     };
     let scores: Vec<f32> = (min_lag..=max_lag).map(corr).collect();
