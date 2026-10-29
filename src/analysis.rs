@@ -101,28 +101,40 @@ fn dot_and_energy(a: &[f32], b: &[f32]) -> (f32, f32) {
 /// Estimates the fundamental of a voiced signal by normalized autocorrelation, searching
 /// 60–500 Hz. Returns `None` for silence or noise.
 pub fn detect_pitch(samples: &[f32], sample_rate: u32) -> Option<f32> {
-    const MIN_HZ: f32 = 60.0;
-    const MAX_HZ: f32 = 500.0;
+    let mut scores = vec![0.0; samples.len()];
+    track_pitch(samples, sample_rate, 60.0, 500.0, &mut scores)
+}
+
+/// Allocation-free core of [`detect_pitch`], usable from the audio thread. `scores` is scratch
+/// space for one correlation per candidate lag; `sample_rate / min_hz + 1` entries always suffice.
+pub(crate) fn track_pitch(
+    samples: &[f32],
+    sample_rate: u32,
+    min_hz: f32,
+    max_hz: f32,
+    scores: &mut [f32],
+) -> Option<f32> {
     // Below about -40 dB it's room noise or mains hum, not a voice.
     if rms(samples) < 0.01 {
         return None;
     }
     let sr = sample_rate as f32;
-    let min_lag = (sr / MAX_HZ) as usize;
-    let max_lag = ((sr / MIN_HZ) as usize).min(samples.len() / 2);
-    if min_lag >= max_lag {
+    let min_lag = (sr / max_hz) as usize;
+    let max_lag = ((sr / min_hz) as usize).min(samples.len() / 2);
+    if min_lag >= max_lag || scores.len() < max_lag - min_lag + 1 {
         return None;
     }
+    let scores = &mut scores[..max_lag - min_lag + 1];
 
     // Normalized correlation at each lag, so the threshold is independent of level.
     let n = samples.len() - max_lag;
     let head = &samples[..n];
     let xx = dot_and_energy(head, head).1;
-    let corr = |lag: usize| {
+    for (i, score) in scores.iter_mut().enumerate() {
+        let lag = min_lag + i;
         let (xy, yy) = dot_and_energy(head, &samples[lag..lag + n]);
-        xy / (xx * yy).sqrt().max(1e-12)
-    };
-    let scores: Vec<f32> = (min_lag..=max_lag).map(corr).collect();
+        *score = xy / (xx * yy).sqrt().max(1e-12);
+    }
     let best = scores.iter().copied().fold(f32::MIN, f32::max);
     if best < 0.6 {
         return None;

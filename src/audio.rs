@@ -13,10 +13,11 @@ use cpal::{
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 
-use crate::effects::{Gate, LowShelf, Smoother, db_to_gain};
+use crate::effects::{Compressor, Gate, HighPass, HighShelf, LowShelf, Smoother, db_to_gain};
 use crate::params::{GATE_OFF_DB, Knob, Params, Stats};
 use crate::pitch::PitchShifter;
 use crate::platform;
+use crate::psola::PsolaShifter;
 
 /// Target fill of the input→output buffer, absorbing callback jitter.
 const BUFFER_TARGET_MS: u32 = 20;
@@ -27,6 +28,9 @@ const VIZ_BUFFER_MS: u32 = 500;
 /// Requested audio callback period where the backend lets us choose (see `platform`).
 const CALLBACK_MS: u32 = 10;
 const WARMTH_SHELF_HZ: f32 = 200.0;
+const VELVET_SHELF_HZ: f32 = 3500.0;
+/// Fixed high-pass below the voice: rumble, desk thumps and plosives.
+const RUMBLE_HPF_HZ: f32 = 70.0;
 
 pub struct Engine {
     pub input_name: String,
@@ -206,15 +210,22 @@ struct Dsp {
     target: usize,
     max: usize,
     shifter: PitchShifter,
+    psola: PsolaShifter,
     gate: Gate,
+    hpf: HighPass,
     shelf: LowShelf,
+    velvet: HighShelf,
+    comp: Compressor,
     gain: Smoother,
     mix: Smoother,
     wet: Smoother,
     last_pitch: f32,
+    last_formant: f32,
     last_window: f32,
     // Per-buffer control snapshot.
+    use_psola: bool,
     gate_threshold: f32,
+    smooth_threshold: f32,
     target_gain: f32,
     target_wet: f32,
     target_mix: f32,
@@ -233,14 +244,21 @@ impl Dsp {
         let p = &params;
         Self {
             shifter: PitchShifter::new(rate, p.get(Knob::Pitch), p.get(Knob::Window)),
+            psola: PsolaShifter::new(rate, p.get(Knob::Pitch), p.get(Knob::Formant)),
             gate: Gate::new(rate),
+            hpf: HighPass::new(rate, RUMBLE_HPF_HZ),
             shelf: LowShelf::new(rate, WARMTH_SHELF_HZ, p.get(Knob::Warmth)),
+            velvet: HighShelf::new(rate, VELVET_SHELF_HZ, p.get(Knob::Velvet)),
+            comp: Compressor::new(rate),
             gain: Smoother::new(rate, 20.0, 0.0),
             mix: Smoother::new(rate, 20.0, p.get(Knob::Mix)),
             wet: Smoother::new(rate, 10.0, 1.0),
             last_pitch: f32::NAN,
+            last_formant: f32::NAN,
             last_window: f32::NAN,
+            use_psola: false,
             gate_threshold: 0.0,
+            smooth_threshold: 0.0,
             target_gain: 0.0,
             target_wet: 1.0,
             target_mix: p.get(Knob::Mix),
@@ -260,14 +278,23 @@ impl Dsp {
         let pitch = p.get(Knob::Pitch);
         if pitch != self.last_pitch {
             self.shifter.set_semitones(pitch);
+            self.psola.set_semitones(pitch);
             self.last_pitch = pitch;
+        }
+        let formant = p.get(Knob::Formant);
+        if formant != self.last_formant {
+            self.psola.set_formant(formant);
+            self.last_formant = formant;
         }
         let window = p.get(Knob::Window);
         if window != self.last_window {
             self.shifter.set_window_ms(window);
             self.last_window = window;
         }
+        self.use_psola = p.psola.load(Ordering::Relaxed);
         self.shelf.set_gain_db(p.get(Knob::Warmth));
+        self.velvet.set_gain_db(p.get(Knob::Velvet));
+        self.smooth_threshold = p.get(Knob::Smooth);
         let gate_db = p.get(Knob::Gate);
         self.gate_threshold = if gate_db <= GATE_OFF_DB { 0.0 } else { db_to_gain(gate_db) };
         let mute = p.mute.load(Ordering::Relaxed);
@@ -287,10 +314,16 @@ impl Dsp {
             self.stats.underruns.fetch_add(1, Ordering::Relaxed);
             0.0
         });
-        let gated = self.gate.process(x, self.gate_threshold);
-        let shifted = self.shelf.process(self.shifter.process_sample(gated, self.mix.next(self.target_mix)));
+        let clean = self.hpf.process(self.gate.process(x, self.gate_threshold));
+        let mix = self.mix.next(self.target_mix);
+        let shifted = if self.use_psola {
+            self.psola.process_sample(clean, mix)
+        } else {
+            self.shifter.process_sample(clean, mix)
+        };
+        let toned = self.comp.process(self.velvet.process(self.shelf.process(shifted)), self.smooth_threshold);
         let w = self.wet.next(self.target_wet);
-        let y = ((x + (shifted - x) * w) * self.gain.next(self.target_gain)).clamp(-1.0, 1.0);
+        let y = ((x + (toned - x) * w) * self.gain.next(self.target_gain)).clamp(-1.0, 1.0);
         let _ = self.viz.try_push((x, y));
         y
     }

@@ -16,7 +16,7 @@ use ringbuf::traits::Consumer;
 
 use crate::analysis::{self, FFT_SIZE, Spectrum};
 use crate::audio::Engine;
-use crate::params::{GATE_OFF_DB, Knob, Params};
+use crate::params::{GATE_OFF_DB, Knob, Params, Preset};
 
 const FRAME: Duration = Duration::from_millis(33);
 const SPECTRUM_LO_HZ: f32 = 63.0;
@@ -32,6 +32,8 @@ const LEVEL_HISTORY: usize = 240;
 const PITCH_HOLD_FRAMES: u32 = 15;
 /// `+`/`-` always adjust pitch by this much, whichever control is selected.
 const PITCH_HOTKEY_STEP: f32 = 0.5;
+const MIN_WIDTH: u16 = 40;
+const MIN_HEIGHT: u16 = 22;
 
 pub fn run(engine: Engine) -> Result<()> {
     let mut terminal = ratatui::init();
@@ -217,6 +219,12 @@ impl App {
             }
             KeyCode::Char(' ') if press => Params::toggle(&self.engine.params.bypass),
             KeyCode::Char('m') if press => Params::toggle(&self.engine.params.mute),
+            KeyCode::Char('a') if press => Params::toggle(&self.engine.params.psola),
+            KeyCode::Char(c @ '1'..='9') if press => {
+                if let Some(preset) = Preset::ALL.get(c as usize - '1' as usize) {
+                    preset.apply(self.params());
+                }
+            }
             _ => {}
         }
     }
@@ -253,9 +261,11 @@ impl App {
 
     fn draw(&self, f: &mut Frame) {
         let area = f.area();
-        if area.width < 40 || area.height < 16 {
+        if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
             f.render_widget(
-                Paragraph::new("Terminal too small for deep voice.\nResize, or press q to quit. Audio is still running."),
+                Paragraph::new(format!(
+                    "Terminal too small for deep voice (needs {MIN_WIDTH}x{MIN_HEIGHT}).\nResize, or press q to quit. Audio is still running."
+                )),
                 area,
             );
             return;
@@ -269,8 +279,12 @@ impl App {
         // Wide: controls on the left, visuals on the right. Narrow: stack and drop the scope.
         if body.width >= 80 {
             let [left, right] = Layout::horizontal([Constraint::Length(40), Constraint::Min(0)]).areas(body);
-            let [controls, levels, health] =
-                Layout::vertical([Constraint::Length(10), Constraint::Min(6), Constraint::Length(5)]).areas(left);
+            let [controls, levels, health] = Layout::vertical([
+                Constraint::Length(controls_height(body.height, 6 + 5)),
+                Constraint::Min(6),
+                Constraint::Length(5),
+            ])
+            .areas(left);
             let [spectrum, scope] =
                 Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(right);
             self.draw_controls(f, controls);
@@ -279,8 +293,12 @@ impl App {
             self.draw_spectrum(f, spectrum);
             self.draw_scope(f, scope);
         } else {
-            let [controls, levels, spectrum] =
-                Layout::vertical([Constraint::Length(10), Constraint::Length(8), Constraint::Min(0)]).areas(body);
+            let [controls, levels, spectrum] = Layout::vertical([
+                Constraint::Length(controls_height(body.height, 8 + 4)),
+                Constraint::Length(8),
+                Constraint::Min(0),
+            ])
+            .areas(body);
             self.draw_controls(f, controls);
             self.draw_levels(f, levels);
             self.draw_spectrum(f, spectrum);
@@ -301,7 +319,13 @@ impl App {
         let left = Line::from(vec![
             Span::styled(" deep voice ", t.accent.add_modifier(Modifier::BOLD)),
             Span::styled(
-                format!(" {} → {} · {:.1} kHz", e.input_name, e.output_name, e.sample_rate as f32 / 1000.0),
+                format!(
+                    " {} → {} · {:.1} kHz · {}",
+                    e.input_name,
+                    e.output_name,
+                    e.sample_rate as f32 / 1000.0,
+                    p.engine_name()
+                ),
                 t.muted,
             ),
         ]);
@@ -319,6 +343,8 @@ impl App {
             ("⇧", "fine", 1),
             ("+/-", "pitch", 5),
             ("r/R", "reset", 2),
+            ("1-3", "preset", 3),
+            ("a", "engine", 2),
             ("space", "bypass", 3),
             ("m", "mute", 4),
             ("q", "quit", 7),
@@ -364,9 +390,11 @@ impl App {
                 ])
             })
             .collect();
-        let knob = Knob::ALL[self.selected];
-        lines.push(Line::default());
-        lines.push(Line::styled(format!("  {}", knob.spec().help), t.muted));
+        if inner.height as usize >= Knob::ALL.len() + 2 {
+            let knob = Knob::ALL[self.selected];
+            lines.push(Line::default());
+            lines.push(Line::styled(format!("  {}", knob.spec().help), t.muted));
+        }
         f.render_widget(Paragraph::new(lines), inner);
     }
 
@@ -534,6 +562,13 @@ impl App {
         .y_axis(Axis::default().bounds([-scale, scale]));
         f.render_widget(chart, area);
     }
+}
+
+/// Rows for the controls panel: every knob plus borders, and the help line when the other
+/// panels (`others` rows) still fit beside it.
+fn controls_height(body_height: u16, others: u16) -> u16 {
+    let knobs = Knob::ALL.len() as u16;
+    if body_height >= knobs + 4 + others { knobs + 4 } else { knobs + 2 }
 }
 
 fn push_history(history: &mut VecDeque<f32>, samples: &[f32], len: usize) {
