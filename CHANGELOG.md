@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/gordlea/deep-voice-privilege/compare/v1.0.0...v1.0.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* optimize detect pitch ([#4](https://github.com/gordlea/deep-voice-privilege/issues/4)) ([aa03c3a](https://github.com/gordlea/deep-voice-privilege/commit/aa03c3aca4d5fb47dbdf4f6d2975776f7218085e))
+
 ## [1.0.0](https://github.com/gordlea/deep-voice-privilege/compare/v0.1.0...v1.0.0) (2026-10-28)
 
 
