@@ -24,8 +24,11 @@ impl AtomicF32 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Knob {
     Pitch,
+    Formant,
     Mix,
     Warmth,
+    Velvet,
+    Smooth,
     Gate,
     Gain,
     Window,
@@ -43,12 +46,17 @@ pub struct KnobSpec {
 
 /// Gate thresholds at or below this are treated as "off".
 pub const GATE_OFF_DB: f32 = -80.0;
+/// Compressor thresholds at or above this are treated as "off".
+pub const SMOOTH_OFF_DB: f32 = 0.0;
 
 impl Knob {
-    pub const ALL: [Knob; 6] = [
+    pub const ALL: [Knob; 9] = [
         Knob::Pitch,
+        Knob::Formant,
         Knob::Mix,
         Knob::Warmth,
+        Knob::Velvet,
+        Knob::Smooth,
         Knob::Gate,
         Knob::Gain,
         Knob::Window,
@@ -66,19 +74,24 @@ impl Knob {
         };
         match self {
             Knob::Pitch => s("Pitch", -12.0, 12.0, -3.0, 0.5, 0.1, "semitones; negative is deeper"),
+            Knob::Formant => s("Formant", -12.0, 12.0, 0.0, 0.5, 0.1, "vowel size; 0 keeps yours (psola only)"),
             Knob::Mix => s("Mix", 0.0, 1.0, 1.0, 0.05, 0.01, "shifted voice vs. original"),
-            Knob::Warmth => s("Warmth", 0.0, 12.0, 0.0, 1.0, 0.5, "low-shelf bass boost at 200 Hz"),
+            Knob::Warmth => s("Warmth", 0.0, 18.0, 0.0, 1.0, 0.5, "low-shelf bass boost at 200 Hz"),
+            Knob::Velvet => s("Velvet", -18.0, 0.0, 0.0, 1.0, 0.5, "high-shelf treble cut above 3.5 kHz"),
+            Knob::Smooth => s("Smooth", -50.0, SMOOTH_OFF_DB, SMOOTH_OFF_DB, 2.0, 1.0, "compressor threshold; lower is more even"),
             Knob::Gate => s("Gate", GATE_OFF_DB, -20.0, GATE_OFF_DB, 2.0, 1.0, "silence input below this level"),
             Knob::Gain => s("Gain", -20.0, 12.0, 0.0, 0.5, 0.1, "output level"),
-            Knob::Window => s("Window", 15.0, 100.0, 40.0, 5.0, 1.0, "grain size; longer is smoother, adds latency"),
+            Knob::Window => s("Window", 15.0, 100.0, 40.0, 5.0, 1.0, "grain size; longer is smoother (grain only)"),
         }
     }
 
     pub fn format(self, v: f32) -> String {
         match self {
-            Knob::Pitch => format!("{v:+.1} st"),
+            Knob::Pitch | Knob::Formant => format!("{v:+.1} st"),
             Knob::Mix => format!("{:.0} %", v * 100.0),
-            Knob::Warmth => format!("{v:+.1} dB"),
+            Knob::Warmth | Knob::Velvet => format!("{v:+.1} dB"),
+            Knob::Smooth if v >= SMOOTH_OFF_DB => "off".into(),
+            Knob::Smooth => format!("{v:.0} dB"),
             Knob::Gate if v <= GATE_OFF_DB => "off".into(),
             Knob::Gate => format!("{v:.0} dB"),
             Knob::Gain => format!("{v:+.1} dB"),
@@ -89,34 +102,47 @@ impl Knob {
 
 pub struct Params {
     pitch: AtomicF32,
+    formant: AtomicF32,
     mix: AtomicF32,
     warmth: AtomicF32,
+    velvet: AtomicF32,
+    smooth: AtomicF32,
     gate: AtomicF32,
     gain: AtomicF32,
     window: AtomicF32,
     pub bypass: AtomicBool,
     pub mute: AtomicBool,
+    /// Use the formant-preserving PSOLA shifter instead of the granular one.
+    pub psola: AtomicBool,
 }
 
 impl Params {
     pub fn new() -> Self {
+        let d = |k: Knob| AtomicF32::new(k.spec().default);
         Self {
-            pitch: AtomicF32::new(Knob::Pitch.spec().default),
-            mix: AtomicF32::new(Knob::Mix.spec().default),
-            warmth: AtomicF32::new(Knob::Warmth.spec().default),
-            gate: AtomicF32::new(Knob::Gate.spec().default),
-            gain: AtomicF32::new(Knob::Gain.spec().default),
-            window: AtomicF32::new(Knob::Window.spec().default),
+            pitch: d(Knob::Pitch),
+            formant: d(Knob::Formant),
+            mix: d(Knob::Mix),
+            warmth: d(Knob::Warmth),
+            velvet: d(Knob::Velvet),
+            smooth: d(Knob::Smooth),
+            gate: d(Knob::Gate),
+            gain: d(Knob::Gain),
+            window: d(Knob::Window),
             bypass: AtomicBool::new(false),
             mute: AtomicBool::new(false),
+            psola: AtomicBool::new(false),
         }
     }
 
     fn slot(&self, knob: Knob) -> &AtomicF32 {
         match knob {
             Knob::Pitch => &self.pitch,
+            Knob::Formant => &self.formant,
             Knob::Mix => &self.mix,
             Knob::Warmth => &self.warmth,
+            Knob::Velvet => &self.velvet,
+            Knob::Smooth => &self.smooth,
             Knob::Gate => &self.gate,
             Knob::Gain => &self.gain,
             Knob::Window => &self.window,
@@ -141,6 +167,52 @@ impl Params {
 
     pub fn toggle(flag: &AtomicBool) {
         flag.fetch_xor(true, Ordering::Relaxed);
+    }
+
+    pub fn engine_name(&self) -> &'static str {
+        if self.psola.load(Ordering::Relaxed) { "psola" } else { "grain" }
+    }
+}
+
+/// A full set of knob values plus the engine choice, applied in one go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Preset {
+    /// The defaults: a few semitones down, nothing else.
+    Humble,
+    /// Public-radio host: a touch deeper, a little body, evened-out levels.
+    Radio,
+    /// The full Barry: much deeper with the vowels kept human, velvet top, close-mic body.
+    Barry,
+}
+
+impl Preset {
+    pub const ALL: [Preset; 3] = [Preset::Humble, Preset::Radio, Preset::Barry];
+
+    pub fn apply(self, params: &Params) {
+        for k in Knob::ALL {
+            params.set(k, k.spec().default);
+        }
+        let set = |k: Knob, v: f32| params.set(k, v);
+        let psola = match self {
+            Preset::Humble => false,
+            Preset::Radio => {
+                set(Knob::Pitch, -2.0);
+                set(Knob::Warmth, 3.0);
+                set(Knob::Smooth, -24.0);
+                set(Knob::Gate, -50.0);
+                false
+            }
+            Preset::Barry => {
+                set(Knob::Pitch, -6.0);
+                set(Knob::Formant, -2.0);
+                set(Knob::Warmth, 9.0);
+                set(Knob::Velvet, -8.0);
+                set(Knob::Smooth, -32.0);
+                set(Knob::Gate, -50.0);
+                true
+            }
+        };
+        params.psola.store(psola, Ordering::Relaxed);
     }
 }
 

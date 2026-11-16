@@ -21,11 +21,14 @@ guaranteed, but your odds are no longer being decided by vocal fold length.
 - Captures your mic, shifts it down (default 3 semitones, adjustable live from -12 to +12), and
   plays it into a virtual audio device that Webex, Zoom, Teams and friends can select as a
   microphone.
-- Granular pitch shifting with about 40 ms of latency, so you still sound like you, only
-  managerial.
+- Two engines: granular pitch shifting with about 40 ms of latency, so you still sound like you,
+  only managerial; and a formant-preserving PSOLA shifter for when you need to go a lot deeper
+  without sounding like a slowed-down cassette (see [Barry mode](#barry-mode)).
 - A terminal UI with live spectrum, scope, levels, detected pitch before and after, and knobs for
-  **Warmth** (bass boost, for when "authoritative" needs to become "narrates documentaries"),
+  **Formant** (vowel size), **Warmth** (bass boost, for when "authoritative" needs to become
+  "narrates documentaries"), **Velvet** (treble roll-off), **Smooth** (a one-knob compressor),
   **Mix**, **Gate**, **Gain** and grain **Window**.
+- Presets on `1`–`3`: *humble*, *radio* and *barry*.
 - `--headless` mode for people who have already achieved enough confidence to not watch the graphs.
 - Runs on macOS, Windows and Linux. Privilege should be portable.
 
@@ -33,6 +36,7 @@ guaranteed, but your odds are no longer being decided by vocal fold length.
 cargo run --release                   # mic → deep voice → virtual device, with the UI
 cargo run --release -- -s -4          # start 4 semitones deeper (use responsibly)
 cargo run --release -- -s 0           # audition your unprivileged baseline
+cargo run --release -- --preset barry # can't get enough of your love
 cargo run --release -- --list-devices # names and [ids] for -i / -o
 cargo run --release -- --headless     # no UI, just vibes and glitch counters
 ```
@@ -104,6 +108,8 @@ raw ALSA; then `-o` targets ALSA devices (e.g. `-o pipewire`) and routing has to
 | ←/→, h/l   | adjust it (hold Shift for fine steps)                   |
 | `+` / `-`  | pitch down/up by half a semitone, whatever is selected  |
 | `r` / `R`  | reset this control / reset everything to factory humble |
+| `1`–`3`    | presets: humble, radio, barry                           |
+| `a`        | switch engine: grain ↔ psola                            |
 | space      | bypass (hear your old voice; a cautionary tale)         |
 | `m`        | mute                                                    |
 | `q`, Esc   | quit and return to society                              |
@@ -111,6 +117,22 @@ raw ALSA; then `-o` targets ALSA devices (e.g. `-o pipewire`) and routing has to
 The **Health** panel counts dropped samples, underruns, drift resyncs and OS-level overloads. A
 few at startup are normal. A steady stream means another app is fighting over the device, or your
 machine is doing something less important than your career.
+
+## Barry mode
+
+Pitch-shifting a voice a long way down has a problem: the resonances of your vocal tract (the
+formants, which make an "ee" an "ee") get shifted down by the same amount, and past about four
+semitones you stop sounding like a bigger person and start sounding like a slowed-down tape of a
+normal one. The **psola** engine (`a`, or any preset that uses it) cuts the voice into
+pitch-synchronous grains and re-lays them at the new pitch while leaving each grain's waveform,
+and hence your vowels, alone. The **Formant** knob then moves the vowels on purpose: a couple of
+semitones down for a bigger chest, zero to keep yours exactly.
+
+The *barry* preset (`3`, or `--preset barry`) pairs that with the rest of the recipe: six
+semitones down, formants two down, a generous **Warmth** boost for the close-mic body, **Velvet**
+rolling the treble off, and **Smooth** keeping the level even so you can murmur. The psola engine
+costs about 35 ms of latency and wants a single voice in a reasonably quiet room; for singing or a
+noisy café, the grain engine is more forgiving.
 
 ## Building
 

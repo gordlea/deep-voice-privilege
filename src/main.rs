@@ -4,6 +4,7 @@ mod effects;
 mod params;
 mod pitch;
 mod platform;
+mod psola;
 mod ui;
 
 use std::io::IsTerminal;
@@ -15,16 +16,20 @@ use anyhow::Result;
 use clap::Parser;
 
 use audio::Engine;
-use params::{Knob, Params};
+use params::{Knob, Params, Preset};
 
 /// Pitch-shift your mic into a virtual audio device (BlackHole on macOS, VB-CABLE on Windows,
 /// a PulseAudio/PipeWire null sink on Linux) and use that as your microphone in meetings.
 #[derive(Parser, Debug)]
 #[command(version)]
 struct Args {
-    /// Starting pitch shift in semitones; negative is deeper.
-    #[arg(short, long, default_value_t = -3.0, allow_hyphen_values = true)]
-    semitones: f32,
+    /// Starting pitch shift in semitones; negative is deeper (default -3, or the preset's).
+    #[arg(short, long, allow_hyphen_values = true)]
+    semitones: Option<f32>,
+
+    /// Start from a preset: humble (the defaults), radio, or barry.
+    #[arg(short, long, value_enum)]
+    preset: Option<Preset>,
 
     /// Input device name or id (substring match). Defaults to the system default mic.
     #[arg(short, long)]
@@ -38,13 +43,13 @@ struct Args {
     #[arg(long)]
     no_create_sink: bool,
 
-    /// Starting grain window in ms. Longer is smoother but adds latency and echo.
-    #[arg(long, default_value_t = 40.0)]
-    window_ms: f32,
+    /// Starting grain window in ms (default 40). Longer is smoother but adds latency and echo.
+    #[arg(long)]
+    window_ms: Option<f32>,
 
-    /// Starting output gain multiplier.
-    #[arg(short, long, default_value_t = 1.0)]
-    gain: f32,
+    /// Starting output gain multiplier (default 1).
+    #[arg(short, long)]
+    gain: Option<f32>,
 
     /// Run without the interactive UI (also used automatically when not in a terminal).
     #[arg(long)]
@@ -78,9 +83,18 @@ fn main() -> Result<()> {
     }
 
     let params = Arc::new(Params::new());
-    params.set(Knob::Pitch, args.semitones);
-    params.set(Knob::Window, args.window_ms);
-    params.set(Knob::Gain, analysis::to_db(args.gain));
+    if let Some(preset) = args.preset {
+        preset.apply(&params);
+    }
+    if let Some(semitones) = args.semitones {
+        params.set(Knob::Pitch, semitones);
+    }
+    if let Some(window_ms) = args.window_ms {
+        params.set(Knob::Window, window_ms);
+    }
+    if let Some(gain) = args.gain {
+        params.set(Knob::Gain, analysis::to_db(gain));
+    }
 
     let engine = Engine::start(&host, args.input.as_deref(), &args.output, params)?;
 
@@ -95,9 +109,10 @@ fn main() -> Result<()> {
 
 fn run_headless(engine: &Engine) -> Result<()> {
     println!(
-        "{} → {:+} semitones → {} @ {} Hz",
+        "{} → {:+} semitones ({}) → {} @ {} Hz",
         engine.input_name,
         engine.params.get(Knob::Pitch),
+        engine.params.engine_name(),
         engine.output_name,
         engine.sample_rate
     );

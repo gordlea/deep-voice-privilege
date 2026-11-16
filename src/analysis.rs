@@ -68,38 +68,73 @@ pub fn rms(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
-    (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+    (dot_and_energy(samples, samples).1 / samples.len() as f32).sqrt()
+}
+
+/// Accumulator lanes for the dot products. Splitting the running sums into independent lanes
+/// is what lets the compiler vectorize them: floats aren't reassociated, so a single scalar
+/// accumulator forces a serial dependency chain. Eight f32 lanes are two SSE/NEON registers,
+/// enough to keep the loop throughput-bound rather than latency-bound.
+const LANES: usize = 8;
+
+/// Returns `(Σ a·b, Σ b·b)` over the zipped slices. The summation order differs from a plain
+/// scalar loop only at float-rounding level.
+fn dot_and_energy(a: &[f32], b: &[f32]) -> (f32, f32) {
+    let mut xy = [0f32; LANES];
+    let mut yy = [0f32; LANES];
+    let (ac, ar) = a.as_chunks::<LANES>();
+    let (bc, br) = b.as_chunks::<LANES>();
+    for (ca, cb) in ac.iter().zip(bc) {
+        for l in 0..LANES {
+            xy[l] += ca[l] * cb[l];
+            yy[l] += cb[l] * cb[l];
+        }
+    }
+    let (mut sxy, mut syy) = (xy.iter().sum::<f32>(), yy.iter().sum::<f32>());
+    for (&x, &y) in ar.iter().zip(br) {
+        sxy += x * y;
+        syy += y * y;
+    }
+    (sxy, syy)
 }
 
 /// Estimates the fundamental of a voiced signal by normalized autocorrelation, searching
 /// 60–500 Hz. Returns `None` for silence or noise.
 pub fn detect_pitch(samples: &[f32], sample_rate: u32) -> Option<f32> {
-    const MIN_HZ: f32 = 60.0;
-    const MAX_HZ: f32 = 500.0;
+    let mut scores = vec![0.0; samples.len()];
+    track_pitch(samples, sample_rate, 60.0, 500.0, &mut scores)
+}
+
+/// Allocation-free core of [`detect_pitch`], usable from the audio thread. `scores` is scratch
+/// space for one correlation per candidate lag; `sample_rate / min_hz + 1` entries always suffice.
+pub(crate) fn track_pitch(
+    samples: &[f32],
+    sample_rate: u32,
+    min_hz: f32,
+    max_hz: f32,
+    scores: &mut [f32],
+) -> Option<f32> {
     // Below about -40 dB it's room noise or mains hum, not a voice.
     if rms(samples) < 0.01 {
         return None;
     }
     let sr = sample_rate as f32;
-    let min_lag = (sr / MAX_HZ) as usize;
-    let max_lag = ((sr / MIN_HZ) as usize).min(samples.len() / 2);
-    if min_lag >= max_lag {
+    let min_lag = (sr / max_hz) as usize;
+    let max_lag = ((sr / min_hz) as usize).min(samples.len() / 2);
+    if min_lag >= max_lag || scores.len() < max_lag - min_lag + 1 {
         return None;
     }
+    let scores = &mut scores[..max_lag - min_lag + 1];
 
     // Normalized correlation at each lag, so the threshold is independent of level.
     let n = samples.len() - max_lag;
-    let corr = |lag: usize| {
-        let (mut xy, mut xx, mut yy) = (0.0, 0.0, 0.0);
-        for i in 0..n {
-            let (a, b) = (samples[i], samples[i + lag]);
-            xy += a * b;
-            xx += a * a;
-            yy += b * b;
-        }
-        xy / (xx * yy).sqrt().max(1e-12)
-    };
-    let scores: Vec<f32> = (min_lag..=max_lag).map(corr).collect();
+    let head = &samples[..n];
+    let xx = dot_and_energy(head, head).1;
+    for (i, score) in scores.iter_mut().enumerate() {
+        let lag = min_lag + i;
+        let (xy, yy) = dot_and_energy(head, &samples[lag..lag + n]);
+        *score = xy / (xx * yy).sqrt().max(1e-12);
+    }
     let best = scores.iter().copied().fold(f32::MIN, f32::max);
     if best < 0.6 {
         return None;
